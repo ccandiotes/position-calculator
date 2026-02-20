@@ -1,0 +1,12 @@
+# exports / logs
+*.csv
+debug_log.txt
+
+# build artifacts
+build/
+dist/
+*.spec
+
+# local/temporary
+__pycache__/
+*.pyc
