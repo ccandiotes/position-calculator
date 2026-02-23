@@ -10,3 +10,5 @@ dist/
 # local/temporary
 __pycache__/
 *.pyc
+Position Calculator Versions Prior To Rev4_5.zip
+*.patch
