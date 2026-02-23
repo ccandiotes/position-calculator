@@ -574,6 +574,15 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         eff_dip = [dp if self.dip_positive_var.get() else -dp for dp in dips_deg]
         incs = [rad(90.0 - max(-90.0, min(90.0, dp))) for dp in eff_dip]
         azs = [rad(a % 360.0) for a in azs_deg]
+
+        # Patch 01 (Critical): Ensure a collar station exists at MD=0
+        # Some surveys start at non-zero depth. Without an MD=0 station, MD=0 is not at the collar,
+        # which can shift "instrument at collar" downhole and inflate installed depth.
+        if mds and mds[0] > 0.0:
+            mds = [0.0] + list(mds)
+            incs = [incs[0]] + list(incs)
+            azs  = [azs[0]]  + list(azs)
+
         return Trajectory(mds, incs, azs, method=self.method_var.get())
 
     def on_compute(self):
