@@ -123,6 +123,19 @@ def set_export_order(v: str):
     CONFIG["export_order"] = v
     save_config()
 
+def get_seed_start_md_default(mode_key: str) -> str:
+    """
+    Persisted optional start MD (from collar) used to seed instrument placement.
+    If blank, the mode will compute start_md from the current Top Instrument logic.
+    """
+    k = f"{mode_key}_seed_start_md"
+    return (CONFIG.get(k) or "").strip()
+
+def set_seed_start_md(mode_key: str, v: str):
+    k = f"{mode_key}_seed_start_md"
+    CONFIG[k] = (v or "").strip()
+    save_config()
+
 
 # ---------------------------------
 # Utils
@@ -385,6 +398,7 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         self.title("Mode1 — Using survey data, Fixed spacing, Specified number from collar XYZ")
         self.geometry("1150x960")
         self.export_dir = export_dir
+        self._mode_key = "mode1"
         try: self.transient(master)
         except Exception: pass
 
@@ -402,6 +416,7 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         self.hole_name_var = tk.StringVar(value="")
         self.fixed_spacing_var = tk.StringVar(value="2.000")
         self.num_instruments_var = tk.StringVar(value="10")
+        self.seed_start_md_var = tk.StringVar(value=get_seed_start_md_default("mode1"))
         self.collar_x_var = tk.StringVar(value="0.000")
         self.collar_y_var = tk.StringVar(value="0.000")
         self.collar_z_var = tk.StringVar(value="0.000")
@@ -464,6 +479,11 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         ttk.Label(pgrid, text="Hole Name:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2); ttk.Entry(pgrid, textvariable=self.hole_name_var, width=32).grid(row=0, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Instrument spacing (m):").grid(row=0, column=2, sticky=tk.W, padx=12); ttk.Entry(pgrid, textvariable=self.fixed_spacing_var, width=12).grid(row=0, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Number of instruments:").grid(row=0, column=4, sticky=tk.W, padx=12); ttk.Entry(pgrid, textvariable=self.num_instruments_var, width=12).grid(row=0, column=5, sticky=tk.W, padx=6)
+        ttk.Label(pgrid, text="Seed start depth from collar (MD, m):").grid(row=0, column=6, sticky=tk.W, padx=12)
+        self.seed_start_md_entry = ttk.Entry(pgrid, textvariable=self.seed_start_md_var, width=14)
+        self.seed_start_md_entry.grid(row=0, column=7, sticky=tk.W, padx=6)
+        self.seed_start_md_entry.bind("<FocusOut>", lambda _e: set_seed_start_md(self._mode_key, self.seed_start_md_var.get()))
+        ttk.Label(pgrid, text="(leave blank to auto-calc)").grid(row=0, column=8, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2); ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12).grid(row=1, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Y:").grid(row=1, column=2, sticky=tk.W, padx=12); ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12).grid(row=1, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Z:").grid(row=1, column=4, sticky=tk.W, padx=12); ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12).grid(row=1, column=5, sticky=tk.W, padx=6)
@@ -636,7 +656,17 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
                 s += step
             return best_md
 
-        start_md = estimate_start_md()
+        seed_txt = (self.seed_start_md_var.get() or "").strip()
+        if seed_txt:
+            seed_md = safe_float(seed_txt)
+            if seed_md is None:
+                messagebox.showwarning("Invalid seed start depth", "Seed start depth from collar must be a number (or blank for auto-calc).", parent=self); return
+            start_md = float(seed_md)
+        else:
+            start_md = estimate_start_md()
+            # Persist the auto-calculated start MD for convenience
+            self.seed_start_md_var.set(f"{start_md:.3f}")
+        set_seed_start_md(self._mode_key, self.seed_start_md_var.get())
 
         rows = []
         for i in range(n_inst):
@@ -1208,12 +1238,14 @@ class Mode3Window(tk.Toplevel):
         self.title("Mode3 — Using collar & toe coordinates, Fixed spacing, Specified number from collar XYZ")
         self.geometry("1150x700")
         self.export_dir = export_dir
+        self._mode_key = "mode3"
         try: self.transient(master)
         except Exception: pass
 
         self.hole_name_var = tk.StringVar(value="")
         self.fixed_spacing_var = tk.StringVar(value="2.000")
         self.num_instruments_var = tk.StringVar(value="10")
+        self.seed_start_md_var = tk.StringVar(value=get_seed_start_md_default("mode3"))
 
         self.collar_x_var = tk.StringVar(value="0.000")
         self.collar_y_var = tk.StringVar(value="0.000")
@@ -1246,6 +1278,11 @@ class Mode3Window(tk.Toplevel):
         ttk.Label(pgrid, text="Instrument spacing (m):").grid(row=0, column=2, sticky=tk.W, padx=12)
         ttk.Entry(pgrid, textvariable=self.fixed_spacing_var, width=12).grid(row=0, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Number of instruments:").grid(row=0, column=4, sticky=tk.W, padx=12)
+        ttk.Label(pgrid, text="Seed start depth from collar (MD, m):").grid(row=0, column=6, sticky=tk.W, padx=12)
+        self.seed_start_md_entry = ttk.Entry(pgrid, textvariable=self.seed_start_md_var, width=14)
+        self.seed_start_md_entry.grid(row=0, column=7, sticky=tk.W, padx=6)
+        self.seed_start_md_entry.bind("<FocusOut>", lambda _e: set_seed_start_md(self._mode_key, self.seed_start_md_var.get()))
+        ttk.Label(pgrid, text="(leave blank to auto-calc)").grid(row=0, column=8, sticky=tk.W, padx=6)
         ttk.Entry(pgrid, textvariable=self.num_instruments_var, width=12).grid(row=0, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
@@ -1332,7 +1369,16 @@ class Mode3Window(tk.Toplevel):
         ux, uy, uz = dx / L, dy / L, dz / L  # unit vector from collar to toe
 
         # MD where the Top Instrument projects onto the line
-        start_md = self._project_top_to_start_md(cx, cy, cz, tx, ty, tz, ux, uy, uz)
+        seed_txt = (self.seed_start_md_var.get() or "").strip()
+        if seed_txt:
+            seed_md = safe_float(seed_txt)
+            if seed_md is None:
+                messagebox.showwarning("Invalid seed start depth", "Seed start depth from collar must be a number (or blank for auto-calc).", parent=self); return
+            start_md = float(seed_md)
+        else:
+            start_md = self._project_top_to_start_md(cx, cy, cz, tx, ty, tz, ux, uy, uz)
+            self.seed_start_md_var.set(f"{start_md:.3f}")
+        set_seed_start_md(self._mode_key, self.seed_start_md_var.get())
 
         # Build raw points as (md, x, y, z)
         # Build raw points with cumulative stepping to ensure exact spacing
@@ -1449,12 +1495,14 @@ class Mode4Window(tk.Toplevel):
         self.title("Mode4 — Using collar XYZ, Azimuth, Dip and Hole Length")
         self.geometry("1150x740")
         self.export_dir = export_dir
+        self._mode_key = "mode4"
         try: self.transient(master)
         except Exception: pass
 
         self.hole_name_var = tk.StringVar(value="")
         self.fixed_spacing_var = tk.StringVar(value="2.000")
         self.num_instruments_var = tk.StringVar(value="10")
+        self.seed_start_md_var = tk.StringVar(value=get_seed_start_md_default("mode4"))
 
         self.collar_x_var = tk.StringVar(value="0.000")
         self.collar_y_var = tk.StringVar(value="0.000")
@@ -1485,6 +1533,11 @@ class Mode4Window(tk.Toplevel):
         ttk.Label(pgrid, text="Instrument spacing (m):").grid(row=0, column=2, sticky=tk.W, padx=12)
         ttk.Entry(pgrid, textvariable=self.fixed_spacing_var, width=12).grid(row=0, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Number of instruments:").grid(row=0, column=4, sticky=tk.W, padx=12)
+        ttk.Label(pgrid, text="Seed start depth from collar (MD, m):").grid(row=0, column=6, sticky=tk.W, padx=12)
+        self.seed_start_md_entry = ttk.Entry(pgrid, textvariable=self.seed_start_md_var, width=14)
+        self.seed_start_md_entry.grid(row=0, column=7, sticky=tk.W, padx=6)
+        self.seed_start_md_entry.bind("<FocusOut>", lambda _e: set_seed_start_md(self._mode_key, self.seed_start_md_var.get()))
+        ttk.Label(pgrid, text="(leave blank to auto-calc)").grid(row=0, column=8, sticky=tk.W, padx=6)
         ttk.Entry(pgrid, textvariable=self.num_instruments_var, width=12).grid(row=0, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
@@ -1582,7 +1635,16 @@ class Mode4Window(tk.Toplevel):
 
         # Start MD via projection of top
         vX, vY, vZ = (tx - cx), (ty - cy), (tz - cz)
-        start_md = vX * ux + vY * uy + vZ * uz
+        seed_txt = (self.seed_start_md_var.get() or "").strip()
+        if seed_txt:
+            seed_md = safe_float(seed_txt)
+            if seed_md is None:
+                messagebox.showwarning("Invalid seed start depth", "Seed start depth from collar must be a number (or blank for auto-calc).", parent=self); return
+            start_md = float(seed_md)
+        else:
+            start_md = vX * ux + vY * uy + vZ * uz
+            self.seed_start_md_var.set(f"{start_md:.3f}")
+        set_seed_start_md(self._mode_key, self.seed_start_md_var.get())
 
         # Build raw points with MD; we'll assign instrument numbers by depth later
         # Build raw points with cumulative stepping to ensure exact spacing
