@@ -695,7 +695,8 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         top_closest   = min(rows, key=lambda r: r[1])
         toe_deepest   = max(rows, key=lambda r: r[1])
         hole = (self.hole_name_var.get() or "").strip()
-        installed_depth_md = toe_deepest[1] + spacing  # deepest MD + one spacing
+        installed_offset = min(spacing, 2.0)
+        installed_depth_md = toe_deepest[1] + installed_offset  # deepest MD + one spacing (capped at +2.0m)
 
         summary = (
             "Export Summary:\n"
@@ -1179,7 +1180,15 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         topmost = min(out_rows, key=lambda r: r[1])   # closest to collar (smallest MD)
         deepest = max(out_rows, key=lambda r: r[1])   # closest to toe (largest MD)
         hole = (self.hole_name_var.get() or "").strip()
-        installed_depth_md = deepest[1]
+        # Patch 03 (Mode2): installed depth = deepest MD + spacing between deepest and 2nd deepest (capped at +2.0m)
+        # spacing_last = deepest_md - second_deepest_md (when at least 2 instruments); otherwise 0.0
+        mds_sorted = sorted(r[1] for r in out_rows)
+        if len(mds_sorted) >= 2:
+            spacing_last = mds_sorted[-1] - mds_sorted[-2]
+        else:
+            spacing_last = 0.0
+        installed_offset = min(spacing_last, 2.0)
+        installed_depth_md = deepest[1] + installed_offset
         summary = (
             "Export Summary:\n"
             f"Hole Name: {hole if hole else '(unnamed)'}\n"
@@ -1441,7 +1450,8 @@ class Mode3Window(tk.Toplevel):
         toe_by_md = max(raw_pts, key=lambda r: r[0])  # closest to toe
 
         hole = (self.hole_name_var.get() or "").strip()
-        installed_depth_md = toe_by_md[0] + spacing  # deepest MD + one spacing + spacing  # deepest MD + one spacing  # <-- FIX: was toe_deepest[1]
+        installed_offset = min(spacing, 2.0)
+        installed_depth_md = toe_by_md[0] + installed_offset  # deepest MD + one spacing (capped at +2.0m)
 
         summary = (
             "Export Summary:\n"
@@ -1721,7 +1731,8 @@ class Mode4Window(tk.Toplevel):
         top_by_md = min(raw_pts, key=lambda r: r[0])
         toe_by_md = max(raw_pts, key=lambda r: r[0])
         hole = (self.hole_name_var.get() or "").strip()
-        installed_depth_md = toe_by_md[0] + spacing  # deepest MD + one spacing
+        installed_offset = min(spacing, 2.0)
+        installed_depth_md = toe_by_md[0] + installed_offset  # deepest MD + one spacing (capped at +2.0m)
 
         summary = (
             "Export Summary:\n"
