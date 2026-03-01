@@ -32,7 +32,8 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Optional, Tuple, Dict
 
-APP_TITLE = "Position Calculator R4.5"
+APP_VER = "R4.5-p5"
+APP_TITLE = f"Position Calculator {APP_VER}"
 
 # ---------------------------------
 # Logging & Config (robust)
