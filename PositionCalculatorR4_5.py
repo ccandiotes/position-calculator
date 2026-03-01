@@ -26,6 +26,7 @@ import csv
 import json
 import math
 import traceback
+import re
 from datetime import datetime
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
@@ -161,6 +162,46 @@ def safe_float(x: str) -> Optional[float]:
         return float(x)
     except Exception:
         return None
+
+# ---------------------------------
+# Smart XYZ paste helper
+# ---------------------------------
+_NUM_RE = re.compile(r"""[-+]?(?:(?:\d+\.\d*)|(?:\d*\.\d+)|(?:\d+))(?:[eE][-+]?\d+)?""")
+
+def _extract_xyz_from_clipboard(s: str):
+    """Return (x,y,z) floats if >=3 numeric tokens exist; otherwise None."""
+    if not s:
+        return None
+    nums = _NUM_RE.findall(s)
+    if len(nums) < 3:
+        return None
+    try:
+        return float(nums[0]), float(nums[1]), float(nums[2])
+    except Exception:
+        return None
+
+def bind_xyz_paste(entry_x: tk.Entry, entry_y: tk.Entry, entry_z: tk.Entry,
+                   var_x: tk.StringVar, var_y: tk.StringVar, var_z: tk.StringVar):
+    """If clipboard contains 3 numbers (comma/tab/space/newline), paste into all XYZ fields."""
+
+    def on_paste(_evt=None):
+        try:
+            clip = entry_x.clipboard_get()
+        except Exception:
+            return
+        xyz = _extract_xyz_from_clipboard(clip)
+        if xyz is None:
+            return  # allow normal paste
+        x, y, z = xyz
+        var_x.set(str(x))
+        var_y.set(str(y))
+        var_z.set(str(z))
+        return "break"
+
+    for e in (entry_x, entry_y, entry_z):
+        e.bind("<<Paste>>", on_paste)
+        e.bind("<Control-v>", on_paste)
+        e.bind("<Control-V>", on_paste)
 
 # ---------------------------------
 # Data
@@ -484,9 +525,15 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         self.seed_start_md_entry.grid(row=0, column=7, sticky=tk.W, padx=6)
         self.seed_start_md_entry.bind("<FocusOut>", lambda _e: set_seed_start_md(self._mode_key, self.seed_start_md_var.get()))
         ttk.Label(pgrid, text="(leave blank to auto-calc)").grid(row=0, column=8, sticky=tk.W, padx=6)
-        ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2); ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12).grid(row=1, column=1, sticky=tk.W, padx=6)
-        ttk.Label(pgrid, text="Collar Y:").grid(row=1, column=2, sticky=tk.W, padx=12); ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12).grid(row=1, column=3, sticky=tk.W, padx=6)
-        ttk.Label(pgrid, text="Collar Z:").grid(row=1, column=4, sticky=tk.W, padx=12); ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12).grid(row=1, column=5, sticky=tk.W, padx=6)
+        ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
+        self.collar_x_entry = ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12)
+        self.collar_x_entry.grid(row=1, column=1, sticky=tk.W, padx=6)
+        ttk.Label(pgrid, text="Collar Y:").grid(row=1, column=2, sticky=tk.W, padx=12)
+        self.collar_y_entry = ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12)
+        self.collar_y_entry.grid(row=1, column=3, sticky=tk.W, padx=6)
+        ttk.Label(pgrid, text="Collar Z:").grid(row=1, column=4, sticky=tk.W, padx=12)
+        self.collar_z_entry = ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12)
+        self.collar_z_entry.grid(row=1, column=5, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Top Instrument X:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
         self.top_x_entry = ttk.Entry(pgrid, textvariable=self.top_x_var, width=12); self.top_x_entry.grid(row=2, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Top Instrument Y:").grid(row=2, column=2, sticky=tk.W, padx=12)
@@ -497,6 +544,12 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         self.top_y_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         self.top_z_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         ttk.Button(pgrid, text="Same as Collar values", command=self.copy_top_from_collar).grid(row=2, column=6, sticky=tk.W, padx=6)
+
+        # Patch 05: Smart paste for XYZ (supports single value or Excel-style X\tY\tZ)
+        bind_xyz_paste(self.collar_x_entry, self.collar_y_entry, self.collar_z_entry,
+                       self.collar_x_var, self.collar_y_var, self.collar_z_var)
+        bind_xyz_paste(self.top_x_entry, self.top_y_entry, self.top_z_entry,
+                       self.top_x_var, self.top_y_var, self.top_z_var)
 
         self.preview_container = ttk.LabelFrame(self, text="Survey preview"); self.preview_container.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
 
@@ -873,11 +926,14 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         ttk.Entry(pgrid, textvariable=self.num_instruments_var, width=12, state="disabled").grid(row=0, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
-        ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12).grid(row=1, column=1, sticky=tk.W, padx=6)
+        self.collar_x_entry = ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12)
+        self.collar_x_entry.grid(row=1, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Y:").grid(row=1, column=2, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12).grid(row=1, column=3, sticky=tk.W, padx=6)
+        self.collar_y_entry = ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12)
+        self.collar_y_entry.grid(row=1, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Z:").grid(row=1, column=4, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12).grid(row=1, column=5, sticky=tk.W, padx=6)
+        self.collar_z_entry = ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12)
+        self.collar_z_entry.grid(row=1, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Hole Toe X:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
         ttk.Entry(pgrid, textvariable=self.toe_x_var, width=12, state="readonly").grid(row=2, column=1, sticky=tk.W, padx=6)
@@ -893,6 +949,12 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         ttk.Label(pgrid, text="Toe Instrument Z:").grid(row=3, column=4, sticky=tk.W, padx=12)
         self.first_z_entry = ttk.Entry(pgrid, textvariable=self.first_z_var, width=12); self.first_z_entry.grid(row=3, column=5, sticky=tk.W, padx=6)
         ttk.Button(pgrid, text="Same as Toe coordinate", command=self.copy_first_from_toe).grid(row=3, column=6, sticky=tk.W, padx=6)
+
+        # Patch 05: Smart paste for XYZ (supports single value or Excel-style X\tY\tZ)
+        bind_xyz_paste(self.collar_x_entry, self.collar_y_entry, self.collar_z_entry,
+                       self.collar_x_var, self.collar_y_var, self.collar_z_var)
+        bind_xyz_paste(self.first_x_entry, self.first_y_entry, self.first_z_entry,
+                       self.first_x_var, self.first_y_var, self.first_z_var)
 
         ttk.Label(pgrid, text="Offset from toe (m):").grid(row=4, column=0, sticky=tk.W, padx=4, pady=2)
         self.dist_entry = ttk.Entry(pgrid, textvariable=self.dist_from_toe_var, width=12); self.dist_entry.grid(row=4, column=1, sticky=tk.W, padx=6)
@@ -1323,19 +1385,25 @@ class Mode3Window(tk.Toplevel):
         ttk.Entry(pgrid, textvariable=self.num_instruments_var, width=12).grid(row=0, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
-        ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12).grid(row=1, column=1, sticky=tk.W, padx=6)
+        self.collar_x_entry = ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12)
+        self.collar_x_entry.grid(row=1, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Y:").grid(row=1, column=2, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12).grid(row=1, column=3, sticky=tk.W, padx=6)
+        self.collar_y_entry = ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12)
+        self.collar_y_entry.grid(row=1, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Z:").grid(row=1, column=4, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12).grid(row=1, column=5, sticky=tk.W, padx=6)
+        self.collar_z_entry = ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12)
+        self.collar_z_entry.grid(row=1, column=5, sticky=tk.W, padx=6)
 
         # Toe row
         ttk.Label(pgrid, text="Toe X:").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
-        ttk.Entry(pgrid, textvariable=self.toe_x_var, width=12).grid(row=2, column=1, sticky=tk.W, padx=6)
+        self.toe_x_entry = ttk.Entry(pgrid, textvariable=self.toe_x_var, width=12)
+        self.toe_x_entry.grid(row=2, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Toe Y:").grid(row=2, column=2, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.toe_y_var, width=12).grid(row=2, column=3, sticky=tk.W, padx=6)
+        self.toe_y_entry = ttk.Entry(pgrid, textvariable=self.toe_y_var, width=12)
+        self.toe_y_entry.grid(row=2, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Toe Z:").grid(row=2, column=4, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.toe_z_var, width=12).grid(row=2, column=5, sticky=tk.W, padx=6)
+        self.toe_z_entry = ttk.Entry(pgrid, textvariable=self.toe_z_var, width=12)
+        self.toe_z_entry.grid(row=2, column=5, sticky=tk.W, padx=6)
 
         # Top Instrument row (same behavior as Mode1)
         ttk.Label(pgrid, text="Top Instrument X:").grid(row=3, column=0, sticky=tk.W, padx=4, pady=2)
@@ -1348,6 +1416,20 @@ class Mode3Window(tk.Toplevel):
         self.top_y_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         self.top_z_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         ttk.Button(pgrid, text="Same as Collar values", command=self.copy_top_from_collar).grid(row=3, column=6, sticky=tk.W, padx=6)
+
+        # Patch 05: Smart paste for XYZ (supports single value or Excel-style X\tY\tZ)
+        bind_xyz_paste(self.collar_x_entry, self.collar_y_entry, self.collar_z_entry,
+                       self.collar_x_var, self.collar_y_var, self.collar_z_var)
+        bind_xyz_paste(self.top_x_entry, self.top_y_entry, self.top_z_entry,
+                       self.top_x_var, self.top_y_var, self.top_z_var)
+
+        # Patch 05: Smart paste for XYZ (supports single value or Excel-style X\tY\tZ)
+        bind_xyz_paste(self.collar_x_entry, self.collar_y_entry, self.collar_z_entry,
+                       self.collar_x_var, self.collar_y_var, self.collar_z_var)
+        bind_xyz_paste(self.toe_x_entry, self.toe_y_entry, self.toe_z_entry,
+                       self.toe_x_var, self.toe_y_var, self.toe_z_var)
+        bind_xyz_paste(self.top_x_entry, self.top_y_entry, self.top_z_entry,
+                       self.top_x_var, self.top_y_var, self.top_z_var)
 
         # NEW: Export order
         order_frame = ttk.LabelFrame(self, text="Export order")
@@ -1594,11 +1676,14 @@ class Mode4Window(tk.Toplevel):
         ttk.Entry(pgrid, textvariable=self.num_instruments_var, width=12).grid(row=0, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Collar X:").grid(row=1, column=0, sticky=tk.W, padx=4, pady=2)
-        ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12).grid(row=1, column=1, sticky=tk.W, padx=6)
+        self.collar_x_entry = ttk.Entry(pgrid, textvariable=self.collar_x_var, width=12)
+        self.collar_x_entry.grid(row=1, column=1, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Y:").grid(row=1, column=2, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12).grid(row=1, column=3, sticky=tk.W, padx=6)
+        self.collar_y_entry = ttk.Entry(pgrid, textvariable=self.collar_y_var, width=12)
+        self.collar_y_entry.grid(row=1, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Collar Z:").grid(row=1, column=4, sticky=tk.W, padx=12)
-        ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12).grid(row=1, column=5, sticky=tk.W, padx=6)
+        self.collar_z_entry = ttk.Entry(pgrid, textvariable=self.collar_z_var, width=12)
+        self.collar_z_entry.grid(row=1, column=5, sticky=tk.W, padx=6)
 
         ttk.Label(pgrid, text="Azimuth (° from North, CW):").grid(row=2, column=0, sticky=tk.W, padx=4, pady=2)
         ttk.Entry(pgrid, textvariable=self.azimuth_deg_var, width=12).grid(row=2, column=1, sticky=tk.W, padx=6)
