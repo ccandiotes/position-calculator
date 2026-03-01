@@ -752,8 +752,14 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
                     w.writerow(["#", line])
                 w.writerow([])
                 w.writerow(["Instrument #", "MD (m)", "X", "Y", "Z", "DistToPrev_m"])
+                prev = None
                 for idx, md, x, y, z in export_rows:
-                    w.writerow([idx, f"{md:.3f}", f"{x:.3f}", f"{y:.3f}", f"{z:.3f}"])
+                    if prev is None:
+                        dist = ""
+                    else:
+                        dist = f"{math.dist(prev, (x, y, z)):.6f}"
+                    w.writerow([idx, f"{md:.3f}", f"{x:.3f}", f"{y:.3f}", f"{z:.3f}", dist])
+                    prev = (x, y, z)
             messagebox.showinfo("Exported", f"Wrote: {out_path}", parent=self)
         except Exception as e:
             messagebox.showerror("Write error", f"Could not write output.\n\n{e}", parent=self)
@@ -1239,7 +1245,7 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
                 for line in summary_text.splitlines():
                     w.writerow(["#", line])
                 w.writerow([])
-                w.writerow(["Instrument #", "Measured Depth Used (m)", "X", "Y", "Z"])
+                w.writerow(["Instrument #", "MD (m)", "X", "Y", "Z", "DistToPrev_m"])
                 prev = None
                 for nr, md, x, y, z in export_rows:
                     if prev is None:
