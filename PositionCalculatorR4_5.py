@@ -1062,6 +1062,13 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         azs = [rad(a % 360.0) for a in azs_deg]
         method = self.method_var.get()
         log(f"Building trajectory with method={method}")
+        # Patch 03 (Critical): Ensure a collar station exists at MD=0 (Mode2 also uses collar-referenced MDs)
+        # Some surveys start at non-zero depth (e.g. first station at 6.03m). Without an MD=0 station,
+        # any instrument depths "from collar" are effectively offset by that first station depth.
+        if mds and mds[0] > 0.0:
+            mds = [0.0] + list(mds)
+            incs = [incs[0]] + list(incs)
+            azs  = [azs[0]]  + list(azs)        
         return Trajectory(mds, incs, azs, method=method)
 
     def _compute_toe(self, traj: 'Trajectory', cx: float, cy: float, cz: float) -> Tuple[float, float, float, float]:
