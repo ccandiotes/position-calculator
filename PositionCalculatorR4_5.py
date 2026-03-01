@@ -493,6 +493,9 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         self.top_y_entry = ttk.Entry(pgrid, textvariable=self.top_y_var, width=12); self.top_y_entry.grid(row=2, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Top Instrument Z:").grid(row=2, column=4, sticky=tk.W, padx=12)
         self.top_z_entry = ttk.Entry(pgrid, textvariable=self.top_z_var, width=12); self.top_z_entry.grid(row=2, column=5, sticky=tk.W, padx=6)
+        self.top_x_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
+        self.top_y_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
+        self.top_z_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         ttk.Button(pgrid, text="Same as Collar values", command=self.copy_top_from_collar).grid(row=2, column=6, sticky=tk.W, padx=6)
 
         self.preview_container = ttk.LabelFrame(self, text="Survey preview"); self.preview_container.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
@@ -524,10 +527,22 @@ class Mode1Window(tk.Toplevel, PreviewAndMappingMixin):
         self.summary_text_widget.configure(state='normal'); self.summary_text_widget.delete('1.0', tk.END)
         self.summary_text_widget.insert(tk.END, text); self.summary_text_widget.configure(state='disabled')
 
+    def _clear_seed_start_md(self):
+        if hasattr(self, 'seed_start_md_var') and self.seed_start_md_var.get() != "":
+            self.seed_start_md_var.set("")
+            try:
+                set_seed_start_md(self._mode_key, "")
+            except Exception as e:
+                log(f"Error saving seed start md: {e}")
+
+    def _on_top_xyz_edited(self, event=None):
+        self._clear_seed_start_md()
+
     def copy_top_from_collar(self):
         self.top_x_var.set(self.collar_x_var.get())
         self.top_y_var.set(self.collar_y_var.get())
         self.top_z_var.set(self.collar_z_var.get())
+        self._clear_seed_start_md()
         log("Top Instrument XYZ copied from Collar XYZ")
 
     def toggle_dip_sign(self):
@@ -1153,11 +1168,11 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
 
         self.computed_rows = out_rows
 
-        # Summary
-        first = min(out_rows, key=lambda r: r[1])  # deepest is instrument 1’s MD after shift
-        last = max(out_rows, key=lambda r: r[1])
+        # Summary (by MD: collar -> toe)
+        topmost = min(out_rows, key=lambda r: r[1])   # closest to collar (smallest MD)
+        deepest = max(out_rows, key=lambda r: r[1])   # closest to toe (largest MD)
         hole = (self.hole_name_var.get() or "").strip()
-        installed_depth_md = first[1]
+        installed_depth_md = deepest[1]
         summary = (
             "Export Summary:\n"
             f"Hole Name: {hole if hole else '(unnamed)'}\n"
@@ -1307,6 +1322,9 @@ class Mode3Window(tk.Toplevel):
         self.top_y_entry = ttk.Entry(pgrid, textvariable=self.top_y_var, width=12); self.top_y_entry.grid(row=3, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Top Instrument Z:").grid(row=3, column=4, sticky=tk.W, padx=12)
         self.top_z_entry = ttk.Entry(pgrid, textvariable=self.top_z_var, width=12); self.top_z_entry.grid(row=3, column=5, sticky=tk.W, padx=6)
+        self.top_x_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
+        self.top_y_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
+        self.top_z_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         ttk.Button(pgrid, text="Same as Collar values", command=self.copy_top_from_collar).grid(row=3, column=6, sticky=tk.W, padx=6)
 
         # NEW: Export order
@@ -1334,10 +1352,22 @@ class Mode3Window(tk.Toplevel):
         self.summary_text_widget.configure(state='normal'); self.summary_text_widget.delete('1.0', tk.END)
         self.summary_text_widget.insert(tk.END, text); self.summary_text_widget.configure(state='disabled')
 
+    def _clear_seed_start_md(self):
+        if hasattr(self, 'seed_start_md_var') and self.seed_start_md_var.get() != "":
+            self.seed_start_md_var.set("")
+            try:
+                set_seed_start_md(self._mode_key, "")
+            except Exception as e:
+                log(f"Error saving seed start md: {e}")
+
+    def _on_top_xyz_edited(self, event=None):
+        self._clear_seed_start_md()
+
     def copy_top_from_collar(self):
         self.top_x_var.set(self.collar_x_var.get())
         self.top_y_var.set(self.collar_y_var.get())
         self.top_z_var.set(self.collar_z_var.get())
+        self._clear_seed_start_md()
         log("Mode3: Top Instrument XYZ copied from Collar XYZ")
 
     def _project_top_to_start_md(self, cx, cy, cz, tx, ty, tz, ux, uy, uz) -> float:
@@ -1561,6 +1591,9 @@ class Mode4Window(tk.Toplevel):
         self.top_y_entry = ttk.Entry(pgrid, textvariable=self.top_y_var, width=12); self.top_y_entry.grid(row=3, column=3, sticky=tk.W, padx=6)
         ttk.Label(pgrid, text="Top Instrument Z:").grid(row=3, column=4, sticky=tk.W, padx=12)
         self.top_z_entry = ttk.Entry(pgrid, textvariable=self.top_z_var, width=12); self.top_z_entry.grid(row=3, column=5, sticky=tk.W, padx=6)
+        self.top_x_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
+        self.top_y_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
+        self.top_z_entry.bind("<KeyRelease>", self._on_top_xyz_edited)
         ttk.Button(pgrid, text="Same as Collar values", command=self.copy_top_from_collar).grid(row=3, column=6, sticky=tk.W, padx=6)
 
         # NEW: Export order
@@ -1588,10 +1621,22 @@ class Mode4Window(tk.Toplevel):
         self.summary_text_widget.configure(state='normal'); self.summary_text_widget.delete('1.0', tk.END)
         self.summary_text_widget.insert(tk.END, text); self.summary_text_widget.configure(state='disabled')
 
+    def _clear_seed_start_md(self):
+        if hasattr(self, 'seed_start_md_var') and self.seed_start_md_var.get() != "":
+            self.seed_start_md_var.set("")
+            try:
+                set_seed_start_md(self._mode_key, "")
+            except Exception as e:
+                log(f"Error saving seed start md: {e}")
+
+    def _on_top_xyz_edited(self, event=None):
+        self._clear_seed_start_md()
+
     def copy_top_from_collar(self):
         self.top_x_var.set(self.collar_x_var.get())
         self.top_y_var.set(self.collar_y_var.get())
         self.top_z_var.set(self.collar_z_var.get())
+        self._clear_seed_start_md()
         log("Mode4: Top Instrument XYZ copied from Collar XYZ")
 
     def _dir_unit_from_az_dip(self, az_deg: float, dip_deg: float) -> Tuple[float, float, float]:
