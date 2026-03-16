@@ -32,7 +32,7 @@ import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from typing import List, Optional, Tuple, Dict
 
-APP_VER = "R4.5-p5"
+APP_VER = "R4.5-p7"
 APP_TITLE = f"Position Calculator {APP_VER}"
 
 # ---------------------------------
@@ -232,6 +232,55 @@ class SurveyData:
         log(f"Loaded rows: {len(rows)} (headers + {len(data)} data rows)")
         return cls(headers, data)
 
+
+class InstrumentDepthData:
+    def __init__(self, headers: List[str], rows: List[List[str]], has_header: bool):
+        self.headers = headers
+        self.rows = rows
+        self.has_header = has_header
+
+    @staticmethod
+    def _looks_like_header(row: List[str]) -> bool:
+        if not row:
+            return False
+        joined = " ".join((c or "").strip() for c in row)
+        if re.search(r"[A-Za-z]", joined):
+            return True
+        non_numeric = 0
+        for c in row:
+            s = (c or "").strip()
+            if s == "":
+                continue
+            if safe_float(s) is None:
+                non_numeric += 1
+        return non_numeric >= max(1, min(2, len(row)))
+
+    @classmethod
+    def from_csv(cls, path: str) -> "InstrumentDepthData":
+        log(f"Reading instrument depth file: {path}")
+        with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
+            sample = f.read(8192)
+            f.seek(0)
+            try:
+                reader = csv.reader(f, dialect=csv.Sniffer().sniff(sample))
+                log("Instrument depth CSV dialect sniffed successfully")
+            except Exception:
+                f.seek(0)
+                reader = csv.reader(f)
+            rows = list(reader)
+        if not rows:
+            raise ValueError("CSV/Text file appears to be empty.")
+        first = rows[0]
+        has_header = cls._looks_like_header(first)
+        if has_header:
+            headers = first
+            data = rows[1:]
+        else:
+            headers = [f"Column {c}" for c in column_letters(len(first))]
+            data = rows
+        log(f"Loaded instrument depth rows: {len(rows)} (has_header={has_header}, data_rows={len(data)})")
+        return cls(headers, data, has_header)
+
 # ---------------------------------
 # Trajectory math
 # ---------------------------------
@@ -376,6 +425,8 @@ class PreviewAndMappingMixin:
         self.persist_depth_idx = int(CONFIG.get("last_depth_col_idx", -1))
         self.persist_az_idx    = int(CONFIG.get("last_az_col_idx", -1))
         self.persist_dip_idx   = int(CONFIG.get("last_dip_col_idx", -1))
+        self.persist_inst_nr_idx = int(CONFIG.get("last_inst_nr_col_idx", -1))
+        self.persist_inst_md_idx = int(CONFIG.get("last_inst_md_col_idx", -1))
 
     def _apply_persisted_mapping(self, combobox: ttk.Combobox, idx: int, options_len: int):
         if 0 <= idx < options_len:
@@ -389,6 +440,13 @@ class PreviewAndMappingMixin:
         CONFIG["last_dip_col_idx"]   = dip_idx
         save_config()
         log(f"Saved mapping indices D/Az/Dip = {depth_idx}/{az_idx}/{dip_idx}")
+
+
+    def _remember_instrument_mapping_indices(self, nr_idx: int, md_idx: int):
+        CONFIG["last_inst_nr_col_idx"] = nr_idx
+        CONFIG["last_inst_md_col_idx"] = md_idx
+        save_config()
+        log(f"Saved instrument mapping indices Nr/MD = {nr_idx}/{md_idx}")
 
     def _bind_mapping_change(self):
         def on_any_change(_evt=None):
@@ -867,10 +925,16 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         self.tie_first_to_toe = False
         self.offset_source_var = tk.StringVar(value="")  # Calculated from Depth File / Manual Override
 
+        self.instrument_depth_data: Optional[InstrumentDepthData] = None
+        self.instrument_depth_path: Optional[str] = None
+        self.selected_inst_nr_col = tk.StringVar()
+        self.selected_inst_md_col = tk.StringVar()
+
         self.measured_depths: List[Tuple[int, float]] = []
         self.computed_rows: List[Tuple[int, float, float, float, float]] = []
-        self.summary_text = tk.StringVar(value="Export Summary:\n(Import MD CSV and Calculate)")
+        self.summary_text = tk.StringVar(value="Export Summary:\n(Select Instrument Depth CSV and Calculate)")
         self.preview_frame = None
+        self.md_preview_frame = None
 
         # NEW: export order (persisted)
         self.export_order_var = tk.StringVar(value=get_export_order_default())
@@ -917,6 +981,20 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
 
         self._add_all_columns_toggle(cfg)
 
+        md_cfg = ttk.LabelFrame(self, text="Select Instrument Depth CSV"); md_cfg.pack(fill=tk.X, padx=12, pady=10)
+        md_top = ttk.Frame(md_cfg); md_top.pack(fill=tk.X, padx=10, pady=8)
+        ttk.Button(md_top, text="Select Instrument Depth CSV", command=self.on_select_md_csv).pack(side=tk.LEFT)
+        self.md_file_label = ttk.Label(md_top, text="No file selected"); self.md_file_label.pack(side=tk.LEFT, padx=10)
+
+        md_map = ttk.Frame(md_cfg); md_map.pack(fill=tk.X, padx=10, pady=6)
+        ttk.Label(md_map, text="Instrument Nr column:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
+        self.inst_nr_combo = ttk.Combobox(md_map, textvariable=self.selected_inst_nr_col, width=24, state="readonly"); self.inst_nr_combo.grid(row=0, column=1, sticky=tk.W, padx=6)
+        ttk.Label(md_map, text="Measured Depth column:").grid(row=0, column=2, sticky=tk.W, padx=12)
+        self.inst_md_combo = ttk.Combobox(md_map, textvariable=self.selected_inst_md_col, width=24, state="readonly"); self.inst_md_combo.grid(row=0, column=3, sticky=tk.W, padx=6)
+
+        self.md_preview_container = ttk.LabelFrame(md_cfg, text="Instrument depth preview")
+        self.md_preview_container.pack(fill=tk.X, padx=10, pady=8)
+
         params = ttk.LabelFrame(self, text="Mode parameters"); params.pack(fill=tk.X, padx=12, pady=10)
         pgrid = ttk.Frame(params); pgrid.pack(fill=tk.X, padx=10, pady=8)
         ttk.Label(pgrid, text="Hole Name:").grid(row=0, column=0, sticky=tk.W, padx=4, pady=2)
@@ -951,7 +1029,6 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         self.first_z_entry = ttk.Entry(pgrid, textvariable=self.first_z_var, width=12); self.first_z_entry.grid(row=3, column=5, sticky=tk.W, padx=6)
         ttk.Button(pgrid, text="Same as Toe coordinate", command=self.copy_first_from_toe).grid(row=3, column=6, sticky=tk.W, padx=6)
 
-        # Patch 05: Smart paste for XYZ (supports single value or Excel-style X\tY\tZ)
         bind_xyz_paste(self.collar_x_entry, self.collar_y_entry, self.collar_z_entry,
                        self.collar_x_var, self.collar_y_var, self.collar_z_var)
         bind_xyz_paste(self.first_x_entry, self.first_y_entry, self.first_z_entry,
@@ -966,7 +1043,6 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         self.preview_container = ttk.LabelFrame(self, text="Survey preview")
         self.preview_container.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
 
-        # NEW: Export order
         order_frame = ttk.LabelFrame(self, text="Export order")
         order_frame.pack(fill=tk.X, padx=12, pady=6)
         def _on_order_change():
@@ -984,11 +1060,11 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         btns = ttk.Frame(self); btns.pack(fill=tk.X, padx=12, pady=10)
         ttk.Button(btns, text="Calculate", command=self.on_compute).pack(side=tk.LEFT)
         ttk.Button(btns, text="Export to CSV", command=self.on_export_csv).pack(side=tk.LEFT, padx=8)
-        ttk.Button(btns, text="Import Measured Depth CSV", command=self.on_import_md_csv).pack(side=tk.LEFT, padx=8)
         ttk.Button(btns, text="Cancel", command=self.on_cancel).pack(side=tk.RIGHT)
 
         self._bind_mapping_change()
-
+        self._bind_md_mapping_change()
+        self._render_md_preview()
     def _set_summary_text(self, text: str):
         self.summary_text_widget.configure(state='normal'); self.summary_text_widget.delete('1.0', tk.END)
         self.summary_text_widget.insert(tk.END, text); self.summary_text_widget.configure(state='disabled')
@@ -1044,54 +1120,136 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
 
         self._render_preview()
 
-    def on_import_md_csv(self):
+    def _auto_pick_instrument_depth_columns(self, headers: List[str]) -> Tuple[int, int]:
+        lowered = [((h or "").strip().lower()) for h in headers]
+
+        def find_idx(options):
+            for i, h in enumerate(lowered):
+                for opt in options:
+                    if opt in h:
+                        return i
+            return None
+
+        idx_nr = find_idx(["instrument nr", "instrument#", "instrument no", "instrument number", "inst nr", "inst", "nr", "no"])
+        idx_md = find_idx(["measured depth (m)", "measured depth", "measured_depth", "md", "depth"])
+        if idx_nr is None:
+            idx_nr = 0 if headers else -1
+        if idx_md is None:
+            idx_md = 1 if len(headers) > 1 else idx_nr
+        if idx_md == idx_nr and len(headers) > 1:
+            idx_md = 1 if idx_nr == 0 else 0
+        return idx_nr, idx_md
+
+    def _bind_md_mapping_change(self):
+        def on_md_change(_evt=None):
+            nr = self._get_col_index_from_choice(self.selected_inst_nr_col.get())
+            md = self._get_col_index_from_choice(self.selected_inst_md_col.get())
+            if None not in (nr, md):
+                self._remember_instrument_mapping_indices(nr, md)
+                self._refresh_measured_depths_from_mapping()
+                self._render_md_preview()
+        self.inst_nr_combo.bind("<<ComboboxSelected>>", on_md_change)
+        self.inst_md_combo.bind("<<ComboboxSelected>>", on_md_change)
+
+    def on_select_md_csv(self):
         initial = CONFIG.get("last_md_dir") or CONFIG.get("last_survey_dir") or CONFIG.get("last_export_dir") or os.getcwd()
-        path = filedialog.askopenfilename(parent=self, title="Select measured-depth CSV",
+        path = filedialog.askopenfilename(parent=self, title="Select instrument depth CSV or TXT",
                                           filetypes=[("CSV or text", "*.csv *.txt"), ("All files", "*.*")],
                                           initialdir=initial)
-        if not path: return
+        if not path:
+            return
         CONFIG["last_md_dir"] = os.path.dirname(path); save_config()
         try:
-            with open(path, "r", encoding="utf-8", errors="ignore", newline="") as f:
-                reader = csv.reader(f); rows = list(reader)
-            if not rows: raise ValueError("Empty file.")
-            header = [h.strip().lower() for h in rows[0]]
-
-            def col_idx(name_options):
-                for i, h in enumerate(header):
-                    for opt in name_options:
-                        if opt in h:
-                            return i
-                return None
-
-            idx_nr = col_idx(["instrument nr", "instrument#", "instrument", "inst", "nr", "no"])
-            idx_md = col_idx(["measured depth (m)", "measured depth", "measured_depth", "md"])
-            if idx_nr is None or idx_md is None:
-                raise ValueError("Columns not found. Expect 'Instrument Nr' and 'Measured Depth (m)'.")
-
-            md_list = []
-            for r in rows[1:]:
-                try:
-                    nr = int(float((r[idx_nr] or "").strip()))
-                    md = float((r[idx_md] or "").strip())
-                except Exception:
-                    continue
-                md_list.append((nr, md))
-            if not md_list: raise ValueError("No valid rows found.")
-
-            md_list.sort(key=lambda t: t[0])  # 1 (deepest) upwards
-            self.measured_depths = md_list
-            self.num_instruments_var.set(str(len(md_list)))
-
-            # Reset auto/manual state
-            self.tie_first_to_toe = False
-            self.dist_from_toe_manual = False
-            self.dist_from_toe_var.set("")
-            self.offset_source_var.set("Calculated from Depth File")
-
-            messagebox.showinfo("Imported", f"Loaded {len(md_list)} instruments from MD CSV.", parent=self)
+            md_data = InstrumentDepthData.from_csv(path)
         except Exception as e:
-            messagebox.showerror("Import error", f"Failed to import MD CSV.\n\n{e}", parent=self)
+            messagebox.showerror("Import error", f"Failed to load instrument depth CSV.\n\n{e}", parent=self); return
+
+        self.instrument_depth_data = md_data
+        self.instrument_depth_path = path
+        self.md_file_label.config(text=os.path.basename(path))
+
+        letters = column_letters(len(md_data.headers))
+        options = [f"{letters[i]}: {md_data.headers[i]}" for i in range(len(md_data.headers))]
+        self.inst_nr_combo["values"] = options
+        self.inst_md_combo["values"] = options
+
+        auto_nr, auto_md = self._auto_pick_instrument_depth_columns(md_data.headers)
+        nr_idx = self.persist_inst_nr_idx if 0 <= self.persist_inst_nr_idx < len(options) else auto_nr
+        md_idx = self.persist_inst_md_idx if 0 <= self.persist_inst_md_idx < len(options) else auto_md
+        self._apply_persisted_mapping(self.inst_nr_combo, nr_idx, len(options))
+        self._apply_persisted_mapping(self.inst_md_combo, md_idx, len(options))
+        if options and self.inst_nr_combo.get() == "":
+            self.inst_nr_combo.current(max(0, auto_nr))
+        if options and self.inst_md_combo.get() == "":
+            self.inst_md_combo.current(max(0, auto_md))
+
+        self.tie_first_to_toe = False
+        self.dist_from_toe_manual = False
+        self.dist_from_toe_var.set("")
+        self.offset_source_var.set("Calculated from Depth File")
+
+        self._refresh_measured_depths_from_mapping()
+        self._render_md_preview()
+
+    def _read_instrument_depths(self, nr_idx: int, md_idx: int) -> List[Tuple[int, float]]:
+        if not self.instrument_depth_data:
+            return []
+        md_list = []
+        for r in self.instrument_depth_data.rows:
+            try:
+                nr = int(float((r[nr_idx] or "").strip()))
+                md = float((r[md_idx] or "").strip())
+            except Exception:
+                continue
+            md_list.append((nr, md))
+        md_list.sort(key=lambda t: t[0])
+        return md_list
+
+    def _refresh_measured_depths_from_mapping(self):
+        nr_idx = self._get_col_index_from_choice(self.selected_inst_nr_col.get())
+        md_idx = self._get_col_index_from_choice(self.selected_inst_md_col.get())
+        if None in (nr_idx, md_idx):
+            self.measured_depths = []
+            self.num_instruments_var.set("0")
+            return
+        self._remember_instrument_mapping_indices(nr_idx, md_idx)
+        self.measured_depths = self._read_instrument_depths(nr_idx, md_idx)
+        self.num_instruments_var.set(str(len(self.measured_depths)))
+        self.offset_source_var.set("Calculated from Depth File" if self.measured_depths else "")
+
+    def _render_md_preview(self):
+        if self.md_preview_frame is not None:
+            self.md_preview_frame.destroy()
+        self.md_preview_frame = ttk.Frame(self.md_preview_container)
+        self.md_preview_frame.pack(fill=tk.X, expand=True)
+        if not self.instrument_depth_data:
+            ttk.Label(self.md_preview_frame, text="No instrument depth data loaded.").pack(anchor=tk.W, padx=8, pady=8)
+            return
+
+        headers = self.instrument_depth_data.headers
+        first_row = self.instrument_depth_data.rows[0] if self.instrument_depth_data.rows else []
+        picked = []
+        nr_idx = self._get_col_index_from_choice(self.selected_inst_nr_col.get())
+        md_idx = self._get_col_index_from_choice(self.selected_inst_md_col.get())
+        for i in (nr_idx, md_idx):
+            if i is not None and 0 <= i < len(headers) and i not in picked:
+                picked.append(i)
+        if not picked:
+            picked = list(range(min(2, len(headers))))
+
+        letters = column_letters(len(headers))
+        ttk.Label(self.md_preview_frame, text="").grid(row=0, column=0, sticky=tk.W, padx=6)
+        for col, i in enumerate(picked, start=1):
+            ttk.Label(self.md_preview_frame, text=letters[i], font=("TkDefaultFont", 9, "bold")).grid(row=0, column=col, padx=6, pady=4)
+        ttk.Label(self.md_preview_frame, text="Header:").grid(row=1, column=0, sticky=tk.W, padx=6)
+        for col, i in enumerate(picked, start=1):
+            ttk.Label(self.md_preview_frame, text=headers[i], wraplength=220).grid(row=1, column=col, padx=6, pady=4, sticky=tk.W)
+        ttk.Label(self.md_preview_frame, text="Row 1:").grid(row=2, column=0, sticky=tk.W, padx=6)
+        for col, i in enumerate(picked, start=1):
+            v = first_row[i] if i < len(first_row) else ""
+            ttk.Label(self.md_preview_frame, text=v, foreground="#333").grid(row=2, column=col, padx=6, pady=4, sticky=tk.W)
+        if not self.instrument_depth_data.has_header:
+            ttk.Label(self.md_preview_frame, text="Header row not detected. Using generic column names.", foreground="#555").grid(row=3, column=0, columnspan=max(2, len(picked)+1), sticky=tk.W, padx=6, pady=4)
 
     def _render_preview(self):
         if self.preview_frame is not None:
@@ -1146,12 +1304,9 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         e_toe, n_toe, tvd_toe = traj.pos_at_md_rel(toe_md)
         return toe_md, cx + e_toe, cy + n_toe, cz - tvd_toe
 
-    def _vertical_fallback(self, prev_pts: List[Tuple[int, float, float, float, float]]) -> Tuple[float, float, float]:
-        if not prev_pts:
-            return float('nan'), float('nan'), float('nan')
-        last = prev_pts[-1]
-        dz_step = (prev_pts[-1][4] - prev_pts[-2][4]) if len(prev_pts) >= 2 else 0.0
-        return last[2], last[3], last[4] + dz_step
+    def _exceeds_survey_depth(self, adj_mds: List[Tuple[int, float]], survey_toe_md: float) -> bool:
+        return any(md > survey_toe_md for _, md in adj_mds)
+
 
     def _maybe_autofill_distance(self, toe_md: float):
         if not self.measured_depths:
@@ -1169,8 +1324,11 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
     def on_compute(self):
         if not self.survey:
             messagebox.showwarning("No Data", "Please select a survey CSV first.", parent=self); return
+        if not self.instrument_depth_data:
+            messagebox.showwarning("No MDs", "Select an Instrument Depth CSV first.", parent=self); return
+        self._refresh_measured_depths_from_mapping()
         if not self.measured_depths:
-            messagebox.showwarning("No MDs", "Import a Measured Depth CSV first.", parent=self); return
+            messagebox.showwarning("No MDs", "No valid instrument depth rows were found for the selected Instrument Nr and Measured Depth columns.", parent=self); return
 
         depth_idx = self._get_col_index_from_choice(self.selected_depth_col.get())
         az_idx = self._get_col_index_from_choice(self.selected_azimuth_col.get())
@@ -1221,19 +1379,18 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
             f"delta={delta:.3f} mode={delta_mode} tie={self.tie_first_to_toe} manual={self.dist_from_toe_manual}")
 
         adj_mds = [(nr, md + delta) for (nr, md) in md_list]
+        extended_beyond_survey = self._exceeds_survey_depth(adj_mds, max_md)
 
         out_rows: List[Tuple[int, float, float, float, float]] = []
         for nr, md in adj_mds:
-            if min_md <= md <= max_md:
+            if md < min_md:
+                x, y, z = cx, cy, cz
+            else:
+                # Patch 06 (Mode2): when instrument depths exceed surveyed hole depth,
+                # extend the hole in the final survey direction (final azimuth/dip).
+                # Trajectory.pos_at_md_rel() already extends beyond max_md using tangent_at_end().
                 e, n, tvd = traj.pos_at_md_rel(md)
                 x, y, z = cx + e, cy + n, cz - tvd
-            else:
-                x, y, z = self._vertical_fallback(out_rows)
-                if any(map(math.isnan, (x, y, z))):
-                    if md > max_md:
-                        x, y, z = toe_x, toe_y, toe_z
-                    else:
-                        x, y, z = cx, cy, cz
             out_rows.append((nr, md, x, y, z))
 
         # Toe Instrument XYZ preview
@@ -1268,6 +1425,12 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
             f"Top Instrument (closest to collar): X:{topmost[2]:.3f}, Y:{topmost[3]:.3f}, Z:{topmost[4]:.3f}\n"
             f"Number of instruments: {len(out_rows)}"
         )
+        if extended_beyond_survey:
+            summary += (
+                "\n"
+                f"Note: Instrument installation depth exceeds the surveyed hole depth ({toe_md:.3f} m).\n"
+                f"The hole was extended in the final survey direction to the final instrument installed depth ({deepest[1]:.3f} m)."
+            )
         self.summary_cache = summary
         self._set_summary_text(summary)
 
@@ -1275,7 +1438,7 @@ class Mode2Window(tk.Toplevel, PreviewAndMappingMixin):
         if outside_ct >= max(1, len(out_rows)//2):
             messagebox.showwarning("Outside survey range",
                                    f"{outside_ct} of {len(out_rows)} instruments lie outside the survey MD range "
-                                   f"({min_md:.3f}–{max_md:.3f}). Vertical fallback used for those points.",
+                                   f"({min_md:.3f}–{max_md:.3f}).",
                                    parent=self)
 
         messagebox.showinfo("Calculated", "Calculation complete. Review the summary, then Export or Calculate again.", parent=self)
